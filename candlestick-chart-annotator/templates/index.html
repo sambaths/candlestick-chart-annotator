@@ -433,6 +433,10 @@
         // IST timezone offset in minutes
         const IST_OFFSET = 330; // 5 hours and 30 minutes
 
+        // Current annotation mode tracking
+        let currentAnnotationMode = null;
+        let lastUsedAnnotationType = 'long_entry'; // Default
+        
         // Convert UTC date to IST - NOTE: Only use when needed for display formatting
         // We won't use this for the data itself since it already comes in IST
         function formatTimeIST(date) {
@@ -1735,6 +1739,251 @@
         document.getElementById('fix-scroll-btn').addEventListener('click', function() {
             fixScrollingIssues();
             showNotification('Scroll behavior has been reset', 'info');
+        });
+        
+        // EASY ANNOTATION FUNCTIONALITY
+        
+        // Function to set the current annotation mode
+        function setAnnotationMode(mode) {
+            currentAnnotationMode = mode;
+            
+            // Update visual feedback - remove active class from all buttons
+            document.querySelectorAll('.btn-annotate').forEach(btn => {
+                btn.classList.remove('active');
+                btn.classList.remove('border-dark');
+                btn.style.boxShadow = 'none';
+            });
+            
+            // Add active class to the selected button
+            if (mode) {
+                const selectedBtn = document.querySelector(`.btn-annotate[data-signal="${mode}"]`);
+                if (selectedBtn) {
+                    selectedBtn.classList.add('active');
+                    selectedBtn.classList.add('border-dark');
+                    selectedBtn.style.boxShadow = '0 0 0 0.2rem rgba(0, 0, 0, 0.25)';
+                    
+                    // Update status notification
+                    showNotification(`Ready to add ${getSignalDisplayName(mode)} annotations - click on chart`, 'info');
+                    
+                    // Update last used type
+                    lastUsedAnnotationType = mode;
+                }
+            } else {
+                showNotification('Annotation mode cleared', 'info');
+            }
+        }
+        
+        // Function to create annotation with the current mode at a specific point
+        function createAnnotationWithMode(dataPoint) {
+            if (!currentAnnotationMode) {
+                showNotification('Please select an annotation type first', 'warning');
+                return;
+            }
+            
+            // Create the annotation object
+            const annotation = {
+                stock: currentStock,
+                timestamp: dataPoint.timestamp,
+                price: dataPoint.price,
+                signal: currentAnnotationMode,
+                reason: ''  // Can be empty for quick annotations
+            };
+            
+            // Save the annotation
+            addAnnotation(annotation);
+        }
+        
+        // Function to toggle the annotation mode
+        function toggleAnnotationMode(mode) {
+            if (currentAnnotationMode === mode) {
+                // If already in this mode, turn it off
+                setAnnotationMode(null);
+            } else {
+                // Switch to this mode
+                setAnnotationMode(mode);
+            }
+        }
+        
+        // Add event listeners to annotation buttons for one-click mode
+        document.addEventListener('DOMContentLoaded', function() {
+            // Add event listeners to annotation buttons
+            document.querySelectorAll('.btn-annotate').forEach(btn => {
+                btn.addEventListener('click', function(e) {
+                    const signalType = this.getAttribute('data-signal');
+                    toggleAnnotationMode(signalType);
+                    e.preventDefault();
+                });
+            });
+            
+            // Add event listener to clear button
+            document.getElementById('btn-clear').addEventListener('click', function(e) {
+                setAnnotationMode(null);
+                e.preventDefault();
+            });
+            
+            // Modify chart click handler to use the current annotation mode
+            const chartContainer = document.getElementById('stockChart');
+            if (chartContainer) {
+                // We'll keep the existing click handler and add our new functionality
+                chartContainer.addEventListener('click', function(e) {
+                    // If we have a clicked point and an active annotation mode
+                    if (window.clickedDataPoint && currentAnnotationMode) {
+                        const pointToAnnotate = {
+                            timestamp: window.clickedDataPoint.timestamp,
+                            price: window.clickedDataPoint.price,
+                            close: true
+                        };
+                        
+                        // Create the annotation directly without showing the modal
+                        const annotation = {
+                            stock: currentStock,
+                            timestamp: pointToAnnotate.timestamp.toString(),
+                            price: pointToAnnotate.price,
+                            signal: currentAnnotationMode,
+                            reason: ''  // Empty reason for quick annotations
+                        };
+                        
+                        // Save the annotation
+                        addAnnotation(annotation);
+                    }
+                });
+            }
+            
+            // Add double-click handler for quick annotation with last used type
+            chartContainer.addEventListener('dblclick', function(e) {
+                if (window.clickedDataPoint) {
+                    const pointToAnnotate = {
+                        timestamp: window.clickedDataPoint.timestamp,
+                        price: window.clickedDataPoint.price,
+                        close: true
+                    };
+                    
+                    // Create annotation with last used type
+                    const annotation = {
+                        stock: currentStock,
+                        timestamp: pointToAnnotate.timestamp,
+                        price: pointToAnnotate.price,
+                        signal: lastUsedAnnotationType,
+                        reason: ''
+                    };
+                    
+                    addAnnotation(annotation);
+                    showNotification(`Quick annotation added (${getSignalDisplayName(lastUsedAnnotationType)})`, 'success');
+                }
+            });
+            
+            // Add keyboard shortcuts for annotation types
+            document.addEventListener('keydown', function(e) {
+                // Only apply shortcuts when not typing in an input field
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                    return;
+                }
+                
+                switch(e.key) {
+                    case '1':
+                        toggleAnnotationMode('long_entry');
+                        break;
+                    case '2':
+                        toggleAnnotationMode('long_exit');
+                        break;
+                    case '3':
+                        toggleAnnotationMode('short_entry');
+                        break;
+                    case '4':
+                        toggleAnnotationMode('short_exit');
+                        break;
+                    case 'Escape':
+                        setAnnotationMode(null);
+                        break;
+                    case 'r':
+                        // Press R to add annotation with last used type at current point
+                        if (window.clickedDataPoint) {
+                            const annotation = {
+                                stock: currentStock,
+                                timestamp: window.clickedDataPoint.timestamp,
+                                price: window.clickedDataPoint.price,
+                                signal: lastUsedAnnotationType,
+                                reason: ''
+                            };
+                            addAnnotation(annotation);
+                        }
+                        break;
+                }
+            });
+            
+            // Add floating tooltip to indicate current mode
+            const modeIndicator = document.createElement('div');
+            modeIndicator.id = 'annotation-mode-indicator';
+            modeIndicator.style.position = 'fixed';
+            modeIndicator.style.bottom = '20px';
+            modeIndicator.style.left = '50%';
+            modeIndicator.style.transform = 'translateX(-50%)';
+            modeIndicator.style.padding = '5px 15px';
+            modeIndicator.style.borderRadius = '20px';
+            modeIndicator.style.backgroundColor = 'rgba(0,0,0,0.7)';
+            modeIndicator.style.color = 'white';
+            modeIndicator.style.fontWeight = 'bold';
+            modeIndicator.style.zIndex = '1000';
+            modeIndicator.style.display = 'none';
+            document.body.appendChild(modeIndicator);
+            
+            // Update the mode indicator when annotation mode changes
+            const updateModeIndicator = function() {
+                if (currentAnnotationMode) {
+                    modeIndicator.textContent = `Mode: ${getSignalDisplayName(currentAnnotationMode)} (ESC to cancel)`;
+                    modeIndicator.style.display = 'block';
+                    
+                    // Set color based on the mode
+                    switch(currentAnnotationMode) {
+                        case 'long_entry':
+                            modeIndicator.style.backgroundColor = 'rgba(44, 160, 44, 0.9)';
+                            break;
+                        case 'long_exit':
+                            modeIndicator.style.backgroundColor = 'rgba(31, 119, 180, 0.9)';
+                            break;
+                        case 'short_entry':
+                            modeIndicator.style.backgroundColor = 'rgba(214, 39, 40, 0.9)';
+                            break;
+                        case 'short_exit':
+                            modeIndicator.style.backgroundColor = 'rgba(255, 127, 14, 0.9)';
+                            break;
+                        default:
+                            modeIndicator.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+                    }
+                } else {
+                    modeIndicator.style.display = 'none';
+                }
+            };
+            
+            // Override the setAnnotationMode function to update the indicator
+            const originalSetAnnotationMode = setAnnotationMode;
+            window.setAnnotationMode = function(mode) {
+                originalSetAnnotationMode(mode);
+                updateModeIndicator();
+            };
+            
+            // Create a small help button for keyboard shortcuts
+            const helpBtn = document.createElement('button');
+            helpBtn.className = 'btn btn-sm btn-info';
+            helpBtn.style.position = 'fixed';
+            helpBtn.style.bottom = '10px';
+            helpBtn.style.left = '10px';
+            helpBtn.innerHTML = '<i class="fas fa-keyboard"></i> Shortcuts';
+            helpBtn.title = 'Show keyboard shortcuts';
+            helpBtn.onclick = function() {
+                alert(`Keyboard Shortcuts:
+1: Toggle Long Entry mode
+2: Toggle Long Exit mode
+3: Toggle Short Entry mode
+4: Toggle Short Exit mode
+R: Repeat last annotation type at current point
+ESC: Clear annotation mode
+
+Mouse:
+Click: Select a point or add annotation if in a mode
+Double-click: Quick add using last annotation type`);
+            };
+            document.body.appendChild(helpBtn);
         });
     </script>
     
