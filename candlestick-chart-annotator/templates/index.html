@@ -1,0 +1,1749 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Data Annotator</title>
+    
+    <!-- Bootstrap CSS and JS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- jQuery -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    
+    <!-- jQuery UI for datepicker -->
+    <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.1/themes/base/jquery-ui.css">
+    <script src="https://code.jquery.com/ui/1.13.1/jquery-ui.min.js"></script>
+    
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <!-- TradingView Lightweight Charts - Updated to latest stable version -->
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+    
+    <!-- Plotly.js for advanced charting -->
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    
+    <!-- Socket.IO for real-time updates -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="/static/css/annotations.css">
+    
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+        }
+        .card {
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .form-control, .form-select {
+            border-radius: 8px;
+        }
+        #stockChart {
+            height: 400px;
+            width: 100%;
+            position: relative;
+        }
+        .nav-tabs {
+            margin-bottom: 20px;
+        }
+        .spinner-border {
+            width: 1.5rem;
+            height: 1.5rem;
+        }
+        .ui-datepicker {
+            font-size: 14px;
+            z-index: 1060 !important;
+        }
+        .ui-datepicker-calendar .ui-state-highlight {
+            background: #fffa90;
+        }
+        .chart-toolbar {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+        .annotation-marker {
+            position: absolute;
+            width: 0;
+            height: 0;
+            border-left: 8px solid transparent;
+            border-right: 8px solid transparent;
+            transform: translate(-50%, -100%);
+            cursor: pointer;
+            z-index: 100;
+        }
+        .annotation-buy {
+            border-bottom: 16px solid #2ca02c;
+        }
+        .annotation-sell {
+            border-bottom: 16px solid #d62728;
+        }
+        #annotationsList {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        /* Styles for annotations table */
+        #annotations-table th, #annotations-table td {
+            padding: 0.5rem;
+            vertical-align: middle;
+        }
+        
+        /* Signal type styling */
+        .signal-cell {
+            font-weight: bold;
+        }
+        
+        .signal-cell.long_entry {
+            color: #2ca02c;
+        }
+        
+        .signal-cell.long_exit {
+            color: #1f77b4;
+        }
+        
+        .signal-cell.short_entry {
+            color: #d62728;
+        }
+        
+        .signal-cell.short_exit {
+            color: #ff7f0e;
+        }
+        
+        /* Make table responsive */
+        .table-responsive {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        /* Ensure the table header stays fixed during scrolling */
+        #annotations-table thead th {
+            position: sticky;
+            top: 0;
+            background-color: #212529;
+            color: white;
+            z-index: 10;
+        }
+    </style>
+    <script>
+        // Add this near the top of your index.html script section:
+        // Preference management functions
+        function savePreference(key, value) {
+            try {
+                localStorage.setItem(key, value);
+                console.log(`Saved preference ${key}:`, value);
+            } catch (e) {
+                console.error('Error saving preference:', e);
+            }
+        }
+
+        function loadPreference(key, defaultValue) {
+            try {
+                const value = localStorage.getItem(key);
+                return value !== null ? value : defaultValue;
+            } catch (e) {
+                console.error('Error loading preference:', e);
+                return defaultValue;
+            }
+        }
+
+        // Then modify these event handlers:
+
+        // Stock selection
+        $("#stockSelect").on('change', function() {
+            currentStock = this.value;
+            console.log(`Selected stock: ${currentStock}`);
+            savePreference('selectedStock', currentStock);
+            
+            // Reset the date when stock changes
+            currentDate = null;
+            loadAvailableDates();
+        });
+
+        // In the datepicker onSelect function
+        onSelect: function(dateText) {
+            currentDate = dateText;
+            $('#dateInput').val(dateText);
+            console.log('Selected date:', currentDate);
+            savePreference('selectedDate', currentDate);
+            loadStockData();
+        }
+
+        // Add this function to restore preferences
+        function restoreUserPreferences() {
+            const savedStock = loadPreference('selectedStock', '');
+            
+            if (savedStock) {
+                console.log('Attempting to restore stock:', savedStock);
+                
+                // Make sure the dropdown is fully initialized
+                const stockSelect = $("#stockSelect");
+                
+                // First check if the option exists
+                if (stockSelect.find(`option[value="${savedStock}"]`).length > 0) {
+                    stockSelect.val(savedStock);
+                    currentStock = savedStock;
+                    
+                    // Wait a moment before triggering the change
+                    setTimeout(() => {
+                        // This will load the dates for this stock
+                        stockSelect.trigger('change');
+                        
+                        // After dates are loaded, try to restore date
+                        setTimeout(() => {
+                            const savedDate = loadPreference('selectedDate', '');
+                            if (savedDate) {
+                                console.log('Attempting to restore date:', savedDate);
+                                $('#dateInput').val(savedDate);
+                                currentDate = savedDate;
+                                
+                                // Finally load the stock data
+                                loadStockData();
+                            }
+                        }, 1000); // Wait for dates to load
+                    }, 100);
+                } else {
+                    console.log('Saved stock not found in options');
+                }
+            }
+        }
+
+        // Call this function when document is ready
+        $(document).ready(function() {
+            // Existing initialization...
+            
+            // Wait for stock list to be loaded before trying to restore preferences
+            setTimeout(restoreUserPreferences, 800);
+            
+            // Handle modal hidden events
+            $('.modal').on('hidden.bs.modal', function () {
+                fixScrollingIssues();
+            });
+            
+            // Add a safety timer to periodically fix scrolling
+            let scrollCheckTimer = setInterval(function() {
+                if (document.body.classList.contains('modal-open') && !document.querySelector('.modal.show')) {
+                    // Body has modal-open class but no visible modal exists
+                    console.log('Detected stuck modal state, fixing...');
+                    fixScrollingIssues();
+                }
+            }, 2000);
+        });
+
+    </script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light mb-4">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">Stock Data Annotator</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/">Annotation</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/data">Data Management</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Left Sidebar -->
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Select Stock</h5>
+                        <select id="stockSelect" class="form-select mb-2">
+                            <option value="">Select a stock...</option>
+                            {% for stock in available_stocks %}
+                            <option value="{{ stock }}">{{ stock }}</option>
+                            {% endfor %}
+                        </select>
+                        <div class="d-flex gap-2 mb-3">
+                            <button id="refreshStocksBtn" class="btn btn-outline-primary btn-sm">
+                                <i class="fas fa-sync-alt"></i> Refresh Stock List
+                            </button>
+                            <button id="loadDatesBtn" class="btn btn-outline-success btn-sm">
+                                <i class="fas fa-calendar"></i> Load Dates
+                            </button>
+                        </div>
+
+                        <h5 class="card-title mt-4">Select Date</h5>
+                        <div id="datepicker" class="mb-3"></div>
+
+                        <!-- Annotation buttons -->
+                        <div class="card mt-4">
+                            <div class="card-header">
+                                <h5 class="mb-0">Add Annotation</h5>
+                                    </div>
+                            <div class="card-body">
+                                <div class="d-grid gap-2 annotation-buttons">
+                                    
+                                    <!-- In your index.html file, update the button labels: -->
+                                    <button id="btn-long-entry" class="btn btn-success btn-annotate" data-signal="long_entry">
+                                        <i class="fas fa-arrow-up"></i> LONG ENTRY
+                                    </button>
+                                    <button id="btn-long-exit" class="btn btn-primary btn-annotate" data-signal="long_exit">
+                                        <i class="fas fa-sign-out-alt"></i> LONG EXIT
+                                    </button>
+                                    <button id="btn-short-entry" class="btn btn-danger btn-annotate" data-signal="short_entry">
+                                        <i class="fas fa-arrow-down"></i> SHORT ENTRY
+                                    </button>
+                                    <button id="btn-short-exit" class="btn btn-warning btn-annotate" data-signal="short_exit">
+                                        <i class="fas fa-sign-out-alt"></i> SHORT EXIT
+                                    </button>
+                                    <button id="btn-clear" class="btn btn-secondary">
+                                        <i class="fas fa-times"></i> CLEAR SELECTION
+                                    </button>
+                                </div>
+                                <p class="text-muted mt-2 small">Click a button to add an annotation at the selected point, or click on the chart to select a specific point.</p>
+                            </div>
+                        </div>
+                    </div>
+                        </div>
+                    </div>
+
+            <!-- Main Content -->
+            <div class="col-md-9">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Stock Chart</h5>
+                        
+                        <div class="chart-toolbar">
+                            <div>
+                                <button id="resetZoomBtn" class="btn btn-outline-secondary btn-sm">
+                                    <i class="fas fa-search-minus"></i> Reset Zoom
+                                </button>
+                                <button id="toggleAnnotationsBtn" class="btn btn-outline-secondary btn-sm">
+                                    <i class="fas fa-map-marker-alt"></i> Toggle Annotations
+                                </button>
+                            </div>
+                            <div>
+                                <span id="priceInfo" class="badge bg-secondary"></span>
+                                <div id="notification-area" class="notification"></div>
+                            </div>
+                        </div>
+                        
+                        <div id="stockChart" tabindex="0"></div>
+                        <div id="candlestick-chart"></div>
+                        <div id="selected-point-store" style="display:none;"></div>
+                        <div id="chart-zoom-store" style="display:none;"></div>
+                        
+                        <!-- Annotations Table -->
+                        <div class="card mt-3">
+                            <div class="card-header">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-sticky-note me-2"></i>Annotations
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-striped table-hover" id="annotations-table">
+                                        <thead class="thead-dark">
+                                            <tr>
+                                                <th style="width: 5%">#</th>
+                                                <th style="width: 10%">Stock</th>
+                                                <th style="width: 25%">Timestamp</th>
+                                                <th style="width: 15%">Signal</th>
+                                                <th style="width: 10%">Price</th>
+                                                <th style="width: 25%">Reason</th>
+                                                <th style="width: 10%">Action</th>
+                                    </tr>
+                                </thead>
+                                        <tbody id="annotations-table-body">
+                                            <!-- Annotations will be populated here -->
+                                </tbody>
+                            </table>
+                                </div>
+                                
+                                <div class="mt-3 d-flex justify-content-end">
+                                    <button id="delete-last-btn" class="btn btn-danger btn-sm">
+                                        <i class="fas fa-trash me-1"></i>Delete Last
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Annotation Modal -->
+    <div class="modal fade" id="annotationModal" data-bs-backdrop="static" tabindex="-1" aria-labelledby="annotationModalLabel" aria-hidden="true">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="annotationModalLabel">Add Annotation</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="annotationInfo" tabindex="-1"></div>
+                    <form id="annotationForm">
+                        <div class="mb-3">
+                            <label for="signalType" class="form-label">Signal Type</label>
+                            <select class="form-select" id="signalType" required>
+                                <option value="long_entry">Long Entry</option>
+                                <option value="long_exit">Long Exit</option>
+                                <option value="short_entry">Short Entry</option>
+                                <option value="short_exit">Short Exit</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="reason" class="form-label">Reason (Optional)</label>
+                            <textarea class="form-control" id="reason" rows="3" placeholder="Enter reason for this annotation..."></textarea>
+                        </div>
+                        <div id="annotationStatus" class="alert" style="display: none;"></div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" form="annotationForm" class="btn btn-primary">Save Annotation</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add this somewhere in your HTML, maybe in the footer or header -->
+    <button id="fix-scroll-btn" class="btn btn-sm btn-link" style="position: fixed; bottom: 10px; right: 10px; z-index: 9999; opacity: 0.7;">
+        Fix Scrolling
+    </button>
+
+    <script>
+        // Global variables
+        let currentStock = null;
+        let currentDate = null;
+        let stockData = [];
+        let annotations = [];
+        let chartInstance = null;
+        const baseURL = "http://localhost:8050";
+        
+        // IST timezone offset in minutes
+        const IST_OFFSET = 330; // 5 hours and 30 minutes
+
+        // Convert UTC date to IST - NOTE: Only use when needed for display formatting
+        // We won't use this for the data itself since it already comes in IST
+        function formatTimeIST(date) {
+            const options = { 
+                hour: '2-digit', 
+                minute: '2-digit', 
+                second: '2-digit',
+                hour12: true,
+                timeZone: 'Asia/Kolkata' // IST timezone
+            };
+            return date.toLocaleTimeString('en-IN', options);
+        }
+        
+        // Format time in HH:MM:SS format
+        function formatTime(date) {
+            const hours = date.getHours().toString().padStart(2, '0');
+            const minutes = date.getMinutes().toString().padStart(2, '0');
+            const seconds = date.getSeconds().toString().padStart(2, '0');
+            return `${hours}:${minutes}:${seconds}`;
+        }
+        
+        // Debug info function - added to fix the error
+        function updateDebugInfo(message) {
+            console.log("Debug:", message);
+            const debugEl = document.getElementById('debugInfo');
+            if (debugEl) {
+                const timestamp = new Date().toLocaleTimeString();
+                const entry = document.createElement('div');
+                entry.textContent = `[${timestamp}] ${message}`;
+                debugEl.appendChild(entry);
+                debugEl.scrollTop = debugEl.scrollHeight;
+            }
+        }
+
+        // Document ready
+        $(document).ready(function() {
+            console.log("Document ready, initializing...");
+            
+            // Initialize stock dropdown
+            initializeStockDropdown();
+            
+            // Load saved preferences
+            loadSavedPreferences();
+            
+            // Initialize annotation form handler
+            $("#annotationForm").submit(function(e) {
+                e.preventDefault();
+                
+                const signalType = document.getElementById('signalType').value;
+                const reason = document.getElementById('reason').value;
+                
+                if (!window.clickedDataPoint) {
+                    alert('No data point selected');
+                    return;
+                }
+                
+                const annotation = {
+                    stock: currentStock,
+                    timestamp: window.clickedDataPoint.timestamp.toString(),
+                    price: window.clickedDataPoint.price,
+                    signal: signalType,
+                    reason: reason
+                };
+                
+                addAnnotation(annotation);
+            });
+            
+            // Initialize reset zoom button
+            $("#resetZoomBtn").click(function() {
+                if (window.chart) {
+                    window.chart.timeScale().fitContent();
+                    console.log("Chart zoom reset");
+                }
+            });
+            
+            // Initialize toggle annotations button
+            $("#toggleAnnotationsBtn").click(function() {
+                window.annotationsVisible = !window.annotationsVisible;
+                drawAnnotations();
+                $(this).text(window.annotationsVisible ? "Hide Annotations" : "Show Annotations");
+            });
+            
+            console.log("Initialization complete");
+        });
+
+        // Load available stocks
+        function loadAvailableStocks(refresh = false) {
+            fetch(baseURL + "/api/stocks")
+                .then(response => response.json())
+                .then(data => {
+                    const stocks = data.stocks || [];
+                    stocks.sort();
+                    
+                    // Clear and repopulate the select
+                    const select = $("#stockSelect");
+                    select.html('<option value="">Select a stock...</option>');
+                    
+                    stocks.forEach(stock => {
+                        select.append(`<option value="${stock}">${stock}</option>`);
+                    });
+                    
+                    // Restore previous selection if possible
+                    if (currentStock && stocks.includes(currentStock)) {
+                        select.val(currentStock);
+                    }
+                })
+                .catch(error => {
+                    console.error("Error loading stocks:", error);
+                })
+                .finally(() => {
+                    if (refresh) {
+                        $("#refreshStocksBtn").html('<i class="fas fa-sync-alt"></i> Refresh Stock List');
+                        $("#refreshStocksBtn").prop('disabled', false);
+                    }
+                });
+        }
+
+        // Load stock data for the selected date
+        function loadStockData() {
+            if (!currentStock || !currentDate) {
+                console.warn('No stock or date selected');
+                return;
+            }
+            
+            console.log(`Loading stock data for ${currentStock} on ${currentDate}`);
+            
+            // Show loading message
+            $('#stockChart').html(`<div class="text-center p-3">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-2">Loading data for ${currentStock} on ${currentDate}...</p>
+            </div>`);
+            
+            // First try the direct endpoint
+            const endpoint = `/api/stock/${currentStock}/date/${currentDate}`;
+            console.log("Fetching from:", endpoint);
+            
+            fetch(endpoint)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .catch(error => {
+                console.warn("Error with direct API call:", error);
+                console.log("Trying alternative endpoint...");
+                
+                // If that fails, try the older endpoint format
+                return fetch(`/api/stocks/${currentStock}/data?date=${currentDate}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                });
+            })
+            .then(data => {
+                if (!data || !data.data || data.data.length === 0) {
+                    console.warn("No data received from API");
+                    $('#stockChart').html('<div class="alert alert-warning">No data available for this date</div>');
+                    return;
+                }
+                
+                // Process data without timezone adjustment (data is already in IST)
+                const processedData = data.data.map(d => {
+                    // Parse timestamp
+                    let timestamp;
+                    try {
+                        timestamp = new Date(d.timestamp);
+                        
+                        // Check if timestamp is valid
+                        if (isNaN(timestamp.getTime())) {
+                            console.error("Invalid timestamp:", d.timestamp);
+                            return null;
+                        }
+                    } catch (e) {
+                        console.error("Error parsing timestamp:", e, d.timestamp);
+                        return null;
+                    }
+                    
+                    // Process price data and skip invalid data points
+                    const open = parseFloat(d.open);
+                    const high = parseFloat(d.high);
+                    const low = parseFloat(d.low);
+                    const close = parseFloat(d.close);
+                    const volume = parseInt(d.volume, 10);
+                    
+                    if (isNaN(open) || isNaN(high) || isNaN(low) || isNaN(close) || isNaN(volume)) {
+                        console.warn("Invalid data point:", d);
+                        return null;
+                    }
+                    
+                    return {
+                        timestamp: timestamp,
+                        open: open,
+                        high: high,
+                        low: low,
+                        close: close,
+                        volume: volume
+                    };
+                })
+                .filter(d => d !== null); // Remove any invalid entries
+                
+                // Debug data
+                console.log(`Received ${data.data.length} data points, processed ${processedData.length} valid points`);
+                
+                if (processedData.length > 0) {
+                    // Log first and last data point for verification
+                    console.log("First data point:", processedData[0]);
+                    console.log("Last data point:", processedData[processedData.length - 1]);
+                    
+                    // Create the chart
+                    createCandlestickChart(processedData);
+                    
+                    // Load annotations for this stock and date
+                    loadAnnotations();
+                } else {
+                    $('#stockChart').html('<div class="alert alert-warning">No valid data available for this date</div>');
+                }
+            })
+            .catch(error => {
+                console.error('Error loading stock data:', error);
+                $('#stockChart').html(`
+                    <div class="alert alert-danger">
+                        <h5>Error loading stock data</h5>
+                        <p>${error.message}</p>
+                        <hr>
+                        <p>Some suggestions:</p>
+                        <ul>
+                            <li>Try reloading the page</li>
+                            <li>Choose a different date</li>
+                            <li>Make sure the stock data exists for this date</li>
+                            <li>Check the browser console for more details</li>
+                        </ul>
+                    </div>
+                `);
+            });
+        }
+
+        // Create candlestick chart using TradingView Lightweight Charts
+        function createCandlestickChart(data) {
+            console.log("Creating candlestick chart with data length:", data.length);
+            
+            // Clear previous chart and any annotations
+            const chartContainer = document.getElementById('stockChart');
+            chartContainer.innerHTML = '';
+            
+            try {
+                // Data structure debug - log exactly what we're getting
+                console.log("First data point:", JSON.stringify(data[0]));
+                
+                // Create chart container and tooltip element
+                chartContainer.innerHTML = '<div id="tooltip" class="chart-tooltip" style="display: none; position: absolute; z-index: 1000; background: white; border: 1px solid #ccc; padding: 8px; border-radius: 4px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);"></div>';
+                const tooltipElement = document.getElementById('tooltip');
+                
+                // Create chart
+                if (window.chart) {
+                    window.chart.remove();
+                }
+                
+                // Create a TradingView Lightweight chart
+                window.chart = LightweightCharts.createChart(chartContainer, {
+                    width: chartContainer.clientWidth,
+                    height: 400,
+                    layout: {
+                        background: { color: '#ffffff' },
+                        textColor: '#333333',
+                        fontSize: 12,
+                    },
+                    grid: {
+                        vertLines: {
+                            color: 'rgba(197, 203, 206, 0.5)',
+                        },
+                        horzLines: {
+                            color: 'rgba(197, 203, 206, 0.5)',
+                        },
+                    },
+                    crosshair: {
+                        mode: LightweightCharts.CrosshairMode.Normal,
+                    },
+                    rightPriceScale: {
+                        borderColor: 'rgba(197, 203, 206, 1)',
+                        visible: true,
+                    },
+                    timeScale: {
+                        borderColor: 'rgba(197, 203, 206, 1)',
+                        timeVisible: true,
+                        secondsVisible: false,
+                        tickMarkFormatter: (time) => {
+                            const date = new Date(time * 1000);
+                            const hours = date.getHours().toString().padStart(2, '0');
+                            const minutes = date.getMinutes().toString().padStart(2, '0');
+                            return `${hours}:${minutes}`;
+                        }
+                    },
+                    watermark: {
+                        visible: true,
+                        fontSize: 36,
+                        horzAlign: 'center',
+                        vertAlign: 'center',
+                        color: 'rgba(171, 71, 188, 0.1)',
+                        text: currentStock,
+                    },
+                    localization: {
+                        timeFormatter: (time) => {
+                            const date = new Date(time * 1000);
+                            return formatTimestamp(date);
+                        }
+                    }
+                });
+                
+                // Create candlestick series
+                window.candlestickSeries = window.chart.addCandlestickSeries({
+                    upColor: 'rgba(38, 166, 154, 1)',
+                    downColor: 'rgba(239, 83, 80, 1)',
+                    borderUpColor: 'rgba(38, 166, 154, 1)',
+                    borderDownColor: 'rgba(239, 83, 80, 1)',
+                    wickUpColor: 'rgba(38, 166, 154, 1)',
+                    wickDownColor: 'rgba(239, 83, 80, 1)',
+                });
+                
+                // Format data for Lightweight Charts
+                const chartData = data.map(item => {
+                    return {
+                        time: item.timestamp.getTime() / 1000,
+                        open: item.open,
+                        high: item.high,
+                        low: item.low,
+                        close: item.close
+                    };
+                });
+                
+                // Set the data
+                window.candlestickSeries.setData(chartData);
+                
+                // Fit the data to view
+                window.chart.timeScale().fitContent();
+                
+                // Subscribe to visible range changes to update annotations
+                window.chart.timeScale().subscribeVisibleTimeRangeChange(repositionAnnotationMarkers);
+                
+                // Add crosshair move handler for tooltip
+                window.chart.subscribeCrosshairMove(function(param) {
+                    const candlestickData = param.seriesData.get(window.candlestickSeries);
+                    const tooltipElement = document.getElementById('tooltip');
+                    
+                    if (!param.point || !candlestickData) {
+                        tooltipElement.style.display = 'none';
+                        return;
+                    }
+                    
+                    // Get data at crosshair position
+                    const price = candlestickData.close;
+                    const time = new Date(candlestickData.time * 1000);
+                    const formattedTime = formatTimestamp(time);
+                    
+                    // Create tooltip content
+                    tooltipElement.innerHTML = `
+                        <div>
+                            <div><strong>${currentStock} at ${formattedTime}</strong></div>
+                            <div>Open: ₹${candlestickData.open.toFixed(2)}</div>
+                            <div>High: ₹${candlestickData.high.toFixed(2)}</div>
+                            <div>Low: ₹${candlestickData.low.toFixed(2)}</div>
+                            <div>Close: ₹${candlestickData.close.toFixed(2)}</div>
+                        </div>
+                    `;
+                    
+                    // Position tooltip near the cursor
+                    tooltipElement.style.left = (param.point.x + 15) + 'px';
+                    tooltipElement.style.top = (param.point.y - 40) + 'px';
+                    tooltipElement.style.display = 'block';
+                    
+                    // Store for potential annotations
+                    window.clickedDataPoint = {
+                        timestamp: time,
+                        price: price
+                    };
+                });
+                
+                // Handle click events for annotations
+                chartContainer.addEventListener('click', function(e) {
+                    if (window.clickedDataPoint) {
+                        // We only want to annotate closing prices
+                        const pointToAnnotate = {
+                            timestamp: window.clickedDataPoint.timestamp,
+                            price: window.clickedDataPoint.price,
+                            // Store that this is a closing price
+                            close: true
+                        };
+                        showAnnotationModal(pointToAnnotate);
+                    }
+                });
+                
+                // Add resize listener to keep chart responsive
+                const resizeChart = function() {
+                    window.chart.applyOptions({
+                        width: chartContainer.clientWidth
+                    });
+                };
+                
+                window.addEventListener('resize', resizeChart);
+                
+                // Load annotations after chart is created
+                loadAnnotations();
+                
+            } catch (error) {
+                console.error("Error creating chart:", error);
+                $('#stockChart').html(`<div class="alert alert-danger">Error creating chart: ${error.message}</div>`);
+            }
+        }
+
+        // Load annotations
+        function loadAnnotations() {
+            if (!currentStock || !currentDate) {
+                console.warn("Cannot load annotations - stock or date not selected");
+                window.annotations = [];
+                updateAnnotationsTable([]);
+                return;
+            }
+            
+            console.log(`Loading annotations for ${currentStock} on ${currentDate}`);
+            
+            fetch('/api/annotations')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    console.log("All annotations loaded:", data);
+                    window.annotations = data.annotations || [];
+                    
+                    // Filter annotations for the current stock and date
+                    const relevantAnnotations = window.annotations.filter(function(annotation) {
+                        const matchesStock = annotation.stock === currentStock;
+                        const matchesDate = annotation.timestamp.substring(0, 10) === currentDate;
+                        return matchesStock && matchesDate;
+                    });
+                    
+                    console.log(`Found ${relevantAnnotations.length} annotations for ${currentStock} on ${currentDate}`);
+                    
+                    // Store the current annotations for reference
+                    window.currentAnnotations = relevantAnnotations;
+                    
+                    // Update the table with these annotations
+                    updateAnnotationsTable(relevantAnnotations);
+                    
+                    // Draw annotations on chart if available
+                    if (window.chart && window.candlestickSeries) {
+                        drawAnnotations();
+                    } else {
+                        console.warn("Chart or candlestick series not available for annotations");
+                    }
+                })
+                .catch(error => {
+                    console.error("Error loading annotations:", error);
+                    window.annotations = [];
+                    updateAnnotationsTable([]);
+                });
+        }
+
+        // Draw annotations on the chart
+        function drawAnnotations() {
+            if (!window.chart || !annotations) {
+                console.warn("Cannot draw annotations - chart or annotations not available");
+                return;
+            }
+            
+            console.log("Drawing annotations on chart");
+            
+            // Clear existing annotation markers
+            document.querySelectorAll('.annotation-marker').forEach(el => el.remove());
+            
+            // Filter annotations to only include the current stock and date
+            const relevantAnnotations = annotations.filter(function(annotation) {
+                return annotation.stock === currentStock && 
+                       annotation.timestamp.substring(0, 10) === currentDate;
+            });
+            
+            console.log(`Found ${relevantAnnotations.length} annotations for ${currentStock} on ${currentDate}`);
+            
+            // Store the annotations for reference in other functions
+            window.currentAnnotations = relevantAnnotations;
+            
+            // Update the annotations table with the filtered annotations
+            updateAnnotationsTable(relevantAnnotations);
+            
+            // Create markers for annotations
+            if (window.annotationsVisible === undefined) {
+                window.annotationsVisible = true;
+            }
+            
+            if (!window.annotationsVisible) {
+                return;
+            }
+            
+            // Check if we have a valid chart and candlestick series
+            if (!window.chart || !window.candlestickSeries) {
+                console.warn("Chart or candlestick series not available");
+                return;
+            }
+            
+            const chartContainer = document.getElementById('stockChart');
+            
+            // Create a collection to store annotation data for repositioning
+            if (!window.annotationMarkers) {
+                window.annotationMarkers = [];
+            } else {
+                window.annotationMarkers = [];
+            }
+            
+            // Process each annotation
+            relevantAnnotations.forEach(function(annotation) {
+                try {
+                    const timestamp = new Date(annotation.timestamp);
+                    const timestampSeconds = timestamp.getTime() / 1000;
+                    const price = parseFloat(annotation.price);
+                    
+                    // Create marker for the annotation
+                    const markerDiv = document.createElement('div');
+                    markerDiv.className = 'annotation-marker';
+                    markerDiv.style.position = 'absolute';
+                    markerDiv.style.zIndex = '1000';
+                    markerDiv.style.cursor = 'pointer';
+                    markerDiv.dataset.time = timestampSeconds.toString();
+                    markerDiv.dataset.price = price.toString();
+                    markerDiv.dataset.id = annotation.id || '';
+                    
+                    // Set color based on signal type
+                    let markerColor;
+                    switch(annotation.signal) {
+                        case 'Long Entry':
+                            markerColor = '#2ca02c'; // Green
+                            markerDiv.innerHTML = '▲'; // Up triangle for buy
+                            break;
+                        case 'Long Exit':
+                            markerColor = '#1f77b4'; // Blue
+                            markerDiv.innerHTML = '▼'; // Down triangle for exit
+                            break;
+                        case 'Short Entry':
+                            markerColor = '#d62728'; // Red
+                            markerDiv.innerHTML = '▼'; // Down triangle for short
+                            break;
+                        case 'Short Exit':
+                            markerColor = '#ff7f0e'; // Orange
+                            markerDiv.innerHTML = '▲'; // Up triangle for short exit
+                            break;
+                        default:
+                            markerColor = '#7f7f7f'; // Gray for unknown
+                            markerDiv.innerHTML = '●'; // Circle for unknown
+                    }
+                    
+                    markerDiv.style.color = markerColor;
+                    markerDiv.style.fontSize = '20px';
+                    markerDiv.style.textShadow = '0px 0px 3px white';
+                    markerDiv.style.fontWeight = 'bold';
+                    
+                    // Add tooltip with details
+                    markerDiv.title = `${annotation.signal} at ${price.toFixed(2)}`;
+                    
+                    // Add click handler to show details
+                    markerDiv.addEventListener('click', function(e) {
+                        e.stopPropagation(); // Prevent chart click
+                        showAnnotationDetails(annotation);
+                    });
+                    
+                    // Store annotation data for updates
+                    window.annotationMarkers.push({
+                        element: markerDiv,
+                        time: timestampSeconds,
+                        price: price,
+                        annotation: annotation
+                    });
+                    
+                    // Add to chart container
+                    chartContainer.appendChild(markerDiv);
+                    
+                } catch (error) {
+                    console.error("Error adding annotation marker:", error, annotation);
+                }
+            });
+            
+            // Position all markers based on current chart state
+            repositionAnnotationMarkers();
+        }
+        
+        // Reposition annotation markers when chart view changes
+        function repositionAnnotationMarkers() {
+            if (!window.chart || !window.candlestickSeries || !window.annotationMarkers) {
+                return;
+            }
+            
+            const chartContainer = document.getElementById('stockChart');
+            
+            window.annotationMarkers.forEach(marker => {
+                try {
+                    // Get coordinates from chart for this time/price point
+                    const coordinate = window.candlestickSeries.priceToCoordinate(marker.price);
+                    const timeCoordinate = window.chart.timeScale().timeToCoordinate(marker.time);
+                    
+                    if (coordinate === null || timeCoordinate === null) {
+                        // Point is not in visible range, hide marker
+                        marker.element.style.display = 'none';
+                        return;
+                    }
+                    
+                    // Make marker visible and position it
+                    marker.element.style.display = 'block';
+                    marker.element.style.left = `${timeCoordinate}px`;
+                    marker.element.style.top = `${coordinate}px`;
+                } catch (error) {
+                    console.error("Error repositioning annotation marker:", error);
+                }
+            });
+        }
+        
+        // Format timestamp to display time in IST
+        function formatTimestamp(timestamp) {
+            const date = new Date(timestamp);
+            
+            // Format as IST time (IST is UTC+5:30)
+            const options = { 
+                hour: '2-digit', 
+                minute: '2-digit', 
+                second: '2-digit',
+                hour12: true,
+                timeZone: 'Asia/Kolkata'
+            };
+            
+            return new Intl.DateTimeFormat('en-IN', options).format(date) + ' IST';
+        }
+        
+        // Toggle annotations visibility
+        document.getElementById('toggleAnnotationsBtn').addEventListener('click', function() {
+            window.annotationsVisible = !window.annotationsVisible;
+            
+            if (window.annotationsVisible) {
+                this.innerHTML = '<i class="fas fa-map-marker-alt"></i> Hide Annotations';
+                drawAnnotations();
+            } else {
+                this.innerHTML = '<i class="fas fa-map-marker-alt"></i> Show Annotations';
+                document.querySelectorAll('.annotation-marker').forEach(el => el.remove());
+            }
+        });
+        
+        // Show annotation details in modal
+        function showAnnotationDetails(annotation) {
+            // Format time in IST
+            const timestamp = new Date(annotation.timestamp);
+            const formattedTime = formatTimestamp(timestamp);
+            const formattedPrice = parseFloat(annotation.price).toFixed(2);
+            
+            // Set information in the modal
+            document.getElementById('annotationInfo').innerHTML = `
+                <div class="alert alert-info">
+                    <strong>Annotation ID:</strong> ${annotation.id} <br>
+                    <strong>Stock:</strong> ${annotation.stock} <br>
+                    <strong>Time:</strong> ${formattedTime} <br>
+                    <strong>Price:</strong> ₹${formattedPrice} <br>
+                    <strong>Signal Type:</strong> ${annotation.signal} <br>
+                    <strong>Reason:</strong> ${annotation.reason || 'None provided'}
+                </div>
+            `;
+            
+            // Hide the form elements since we're just viewing
+            document.getElementById('signalType').parentNode.style.display = 'none';
+            document.getElementById('reason').parentNode.style.display = 'none';
+            document.getElementById('annotationStatus').style.display = 'none';
+            
+            // Change button text and purpose
+            const submitButton = document.querySelector('#annotationModal button[type="submit"]');
+            submitButton.style.display = 'none';
+            
+            // Get modal and show it
+            const modal = new bootstrap.Modal(document.getElementById('annotationModal'));
+            modal.show();
+            
+            // Set up event listener to restore form when modal is closed
+            document.getElementById('annotationModal').addEventListener('hidden.bs.modal', function() {
+                document.getElementById('signalType').parentNode.style.display = 'block';
+                document.getElementById('reason').parentNode.style.display = 'block';
+                submitButton.style.display = 'block';
+            }, { once: true });
+        }
+        
+        // Update annotations table
+        function updateAnnotationsTable(annotations) {
+            console.log("Updating annotations table with:", annotations);
+            
+            // If no annotations provided, use current annotations
+            if (!annotations) {
+                annotations = currentAnnotations || [];
+            }
+            
+            // Filter to only show annotations from current date
+            if (currentDate) {
+                annotations = annotations.filter(annotation => {
+                    // Extract the date part of the timestamp (YYYY-MM-DD)
+                    let annotationDate;
+                    
+                    if (annotation.timestamp) {
+                        try {
+                            // Handle ISO string format
+                            if (typeof annotation.timestamp === 'string') {
+                                annotationDate = annotation.timestamp.split('T')[0];
+                            } 
+                            // Handle Date object
+                            else if (annotation.timestamp instanceof Date) {
+                                annotationDate = annotation.timestamp.toISOString().split('T')[0];
+                            }
+                            
+                            // Compare with currentDate
+                            return annotationDate === currentDate;
+                        } catch (e) {
+                            console.error("Error parsing annotation date:", e);
+                            return false;
+                        }
+                    }
+                    return false;
+                });
+            }
+            
+            // Clear the table
+            const tableBody = document.getElementById('annotations-table-body');
+            if (!tableBody) {
+                console.warn("Annotations table body not found");
+                return;
+            }
+            
+            tableBody.innerHTML = '';
+            
+            // Check if there are annotations to display
+            if (annotations.length === 0) {
+                const row = document.createElement('tr');
+                row.innerHTML = '<td colspan="7" class="text-center">No annotations for the selected date</td>';
+                tableBody.appendChild(row);
+                return;
+            }
+            
+            // Sort annotations by timestamp
+            annotations.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            
+            // Add each annotation to the table
+            annotations.forEach(annotation => {
+                const timestamp = new Date(annotation.timestamp);
+                const formattedTime = formatTimestamp(timestamp);
+                const formattedPrice = parseFloat(annotation.price).toFixed(2);
+                
+                const row = document.createElement('tr');
+                
+                // Set badge color based on signal type
+                const badgeClass = (annotation.signal === 'Long Entry' || annotation.signal === 'Short Exit') 
+                    ? 'bg-success' : 'bg-danger';
+                
+                row.innerHTML = `
+                    <td>${annotation.id || index + 1}</td>
+                    <td>${annotation.stock || 'N/A'}</td>
+                    <td>${formattedTime}</td>
+                    <td><span class="badge ${badgeClass}">${getSignalDisplayName(annotation.signal)}</span></td>
+                    <td>₹${formattedPrice}</td>
+                    <td class="reason-cell">${annotation.reason || '-'}</td>
+                    <td>
+                        <!-- buttons -->
+                    </td>
+                `;
+                
+                tableBody.appendChild(row);
+            });
+            
+            // Add event listeners for buttons
+            document.querySelectorAll('.view-ann-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const id = this.getAttribute('data-id');
+                    const annotation = annotations.find(a => a.id.toString() === id);
+                    if (annotation) {
+                        showAnnotationDetails(annotation);
+                    }
+                });
+            });
+            
+            document.querySelectorAll('.delete-ann-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const id = this.getAttribute('data-id');
+                    if (confirm('Are you sure you want to delete this annotation?')) {
+                        deleteAnnotation(id);
+                    }
+                });
+            });
+        }
+
+        // In the updateAnnotationsTable function:
+        function getSignalDisplayName(signal) {
+            switch(signal) {
+                case 'long_entry': return 'LONG ENTRY';
+                case 'long_exit': return 'LONG EXIT';
+                case 'short_entry': return 'SHORT ENTRY';
+                case 'short_exit': return 'SHORT EXIT';
+                default: return signal;
+            }
+        }
+
+        // Add annotation
+        function addAnnotation(annotation) {
+            console.log("Saving annotation:", annotation);
+            
+            // Show loading status
+            $("#annotationStatus").text("Saving annotation...").removeClass("text-danger").addClass("text-info").show();
+            
+            fetch('/api/annotations', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(annotation)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.error) {
+                    showNotification(data.error, 'error');
+                } else {
+                    showNotification('Annotation added successfully', 'success');
+                    
+                    // Fix scrolling issues
+                    setTimeout(fixScrollingIssues, 100);
+                    
+                    // Request updated annotations
+                    setTimeout(() => {
+                        socket.emit('get_annotations');
+                    }, 500);
+                }
+            })
+            .catch(error => {
+                console.error("Error saving annotation:", error);
+                $("#annotationStatus").text(`Error: ${error.message}`).removeClass("text-info").addClass("text-danger");
+            });
+        }
+
+        // Delete annotation
+        function deleteAnnotation(id) {
+            if (!id) {
+                console.error("Invalid annotation ID");
+                return;
+            }
+            
+            console.log(`Deleting annotation with ID: ${id}`);
+            
+            fetch(`/api/annotations/${id}`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log("Annotation deleted successfully:", data);
+                
+                // Remove from global annotations array
+                if (window.annotations) {
+                    window.annotations = window.annotations.filter(a => a.id !== parseInt(id) && a.id !== id);
+                }
+                
+                // Remove from current annotations array
+                if (window.currentAnnotations) {
+                    window.currentAnnotations = window.currentAnnotations.filter(a => a.id !== parseInt(id) && a.id !== id);
+                    
+                    // Update the table with remaining annotations
+                    updateAnnotationsTable(window.currentAnnotations);
+                }
+                
+                // Redraw annotations on chart
+                drawAnnotations();
+                
+                alert("Annotation deleted successfully");
+            })
+            .catch(error => {
+                console.error("Error deleting annotation:", error);
+                alert(`Error deleting annotation: ${error.message}`);
+            });
+        }
+
+        // Load available dates for the selected stock
+        function loadAvailableDates() {
+            if (!currentStock) {
+                console.warn('No stock selected');
+                return;
+            }
+            
+            // Update the loading message
+            $('#datepicker').html('<div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div>');
+            
+            console.log(`Loading available dates for ${currentStock}`);
+            
+            fetch(`/api/stock/${currentStock}/dates`)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                availableDates = data.dates || [];
+                console.log(`Loaded ${availableDates.length} available dates for ${currentStock}`);
+                
+                // Create a fresh datepicker
+                $('#datepicker').html(`
+                    <div class="input-group mb-2">
+                        <input type="text" class="form-control" id="dateInput" readonly>
+                    </div>
+                    <div id="calendarContainer"></div>
+                `);
+                
+                if (availableDates.length > 0) {
+                    // Enable only available dates
+                    const enabledDates = {};
+                    availableDates.forEach(date => {
+                        enabledDates[date] = true;
+                    });
+                    
+                    // Initialize the datepicker with jQuery UI
+                    $('#calendarContainer').datepicker({
+                        dateFormat: 'yy-mm-dd',
+                        beforeShowDay: function(date) {
+                            const year = date.getFullYear();
+                            const month = ('0' + (date.getMonth() + 1)).slice(-2);
+                            const day = ('0' + date.getDate()).slice(-2);
+                            const dateString = `${year}-${month}-${day}`;
+                            
+                            // Check if this date exists in the available dates
+                            const isAvailable = enabledDates[dateString] === true;
+                            
+                            // Check if it's a weekday (Monday to Friday)
+                            const day_of_week = date.getDay();
+                            const isWeekday = day_of_week > 0 && day_of_week < 6;
+                            
+                            // Date is selectable if it's available and a weekday
+                            return [isAvailable && isWeekday, ''];
+                        },
+                        onSelect: function(dateText) {
+                            currentDate = dateText;
+                            $('#dateInput').val(dateText);
+                            console.log('Selected date:', currentDate);
+                            
+                            // Save preference
+                            localStorage.setItem('selectedDate', currentDate);
+                            
+                            loadStockData();
+                        }
+                    });
+                    
+                    // Sort dates in descending order and select the latest one
+                    availableDates.sort().reverse();
+                    const latestDate = availableDates[0];
+                    currentDate = latestDate;
+                    $('#dateInput').val(latestDate);
+                    $('#calendarContainer').datepicker('setDate', latestDate);
+                    
+                    // Make sure the calendar is visible
+                    $('#calendarContainer').show();
+                    
+                    // Load stock data for the selected date
+                    loadStockData();
+                } else {
+                    $('#datepicker').html('<div class="alert alert-warning">No data available for this stock</div>');
+                }
+            })
+            .catch(error => {
+                console.error('Error loading dates:', error);
+                $('#datepicker').html(`<div class="alert alert-danger">Error loading dates: ${error.message}</div>`);
+            });
+        }
+
+        // Initialize the stock selection dropdown
+        function initializeStockDropdown() {
+            fetch('/api/stocks')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                const stocks = data.stocks || [];
+                
+                if (stocks.length === 0) {
+                    console.warn("No stocks available from API");
+                    return;
+                }
+                
+                const stockSelect = document.getElementById('stockSelect');
+                stockSelect.innerHTML = '';
+                
+                stocks.forEach(stock => {
+                    const option = document.createElement('option');
+                    option.value = stock;
+                    option.textContent = stock;
+                    stockSelect.appendChild(option);
+                });
+                
+                // Select the first stock by default
+                if (stocks.length > 0) {
+                    currentStock = stocks[0];
+                    loadAvailableDates();
+                }
+                
+                // Add event listener for stock selection
+                stockSelect.addEventListener('change', function() {
+                    currentStock = this.value;
+                    console.log(`Selected stock: ${currentStock}`);
+                    currentDate = null;
+                    
+                    // Save preference
+                    localStorage.setItem('selectedStock', currentStock);
+                    
+                    loadAvailableDates();
+                });
+            })
+            .catch(error => {
+                console.error('Error loading stocks:', error);
+                document.getElementById('stockSelect').innerHTML = 
+                    `<option value="">Error loading stocks: ${error.message}</option>`;
+            });
+        }
+
+        // Show annotation modal
+        function showAnnotationModal(dataPoint) {
+            // Format time in IST
+            const formattedTime = formatTimestamp(dataPoint.timestamp);
+            const formattedPrice = dataPoint.price.toFixed(2);
+            
+            // Set information in the modal
+            document.getElementById('annotationInfo').innerHTML = `
+                <div class="alert alert-info">
+                    <strong>Annotating:</strong> ${currentStock} at ${formattedTime} <br>
+                    <strong>Closing Price:</strong> ₹${formattedPrice} <br>
+                    <small class="text-muted">Select annotation type below</small>
+                </div>
+            `;
+            
+            // Get modal and show it
+            const modal = new bootstrap.Modal(document.getElementById('annotationModal'));
+            modal.show();
+        }
+
+        // Debug script to ensure annotations are loaded and displayed
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM loaded, checking for annotation initialization');
+            
+            // Track chart and annotation availability
+            let chartReady = false;
+            let annotationsLoaded = false;
+            
+            // Check if socket is connected
+            if (typeof io !== 'undefined') {
+                console.log('Socket.IO is available');
+                
+                // Request annotations data once socket is ready
+                const socket = io();
+                socket.on('connect', function() {
+                    console.log('Socket connected, requesting annotations');
+                    socket.emit('get_annotations');
+                });
+                
+                // Monitor annotations data
+                socket.on('annotations_data', function(data) {
+                    console.log('Annotations data received:', data.annotations ? data.annotations.length : 0);
+                    annotationsLoaded = true;
+                    checkAndInitialize();
+                });
+            } else {
+                console.warn('Socket.IO not available');
+            }
+            
+            // Check if chart is ready
+            function checkChart() {
+                const plotlyChart = document.getElementById('candlestick-chart');
+                const lwChart = document.getElementById('stockChart');
+                
+                if (plotlyChart || lwChart) {
+                    console.log('Chart element found');
+                    chartReady = true;
+                    return true;
+                }
+                return false;
+            }
+            
+            // Check if both chart and annotations are ready
+            function checkAndInitialize() {
+                if (chartReady && annotationsLoaded) {
+                    console.log('Both chart and annotations are ready, initializing');
+                    
+                    // Force update of annotations on chart
+                    if (typeof updateAnnotationsOnChart === 'function') {
+                        console.log('Calling updateAnnotationsOnChart manually');
+                        console.log('Annotations data:', window.currentAnnotations);
+                        updateAnnotationsOnChart(window.currentAnnotations);
+                    }
+                    
+                    // Additional check after a short delay
+                    setTimeout(function() {
+                        if (typeof drawAnnotations === 'function') {
+                            console.log('Calling drawAnnotations after delay');
+                            drawAnnotations(window.currentAnnotations);
+                        }
+                    }, 1000);
+                }
+            }
+            
+            // Periodically check chart readiness
+            const chartCheckInterval = setInterval(function() {
+                if (checkChart()) {
+                    clearInterval(chartCheckInterval);
+                    checkAndInitialize();
+                }
+            }, 500);
+            
+            // Stop checking after 10 seconds
+            setTimeout(function() {
+                clearInterval(chartCheckInterval);
+            }, 10000);
+        });
+
+        // Add these new functions to handle preferences
+        function loadSavedPreferences() {
+            const savedStock = localStorage.getItem('selectedStock');
+            const savedDate = localStorage.getItem('selectedDate');
+            
+            // Apply saved stock selection if available
+            if (savedStock) {
+                const stockSelect = document.getElementById('stockSelect');
+                if (stockSelect) {
+                    // Wait a moment for the stock options to load
+                setTimeout(() => {
+                        stockSelect.value = savedStock;
+                        // Trigger change event to load dates
+                        $(stockSelect).trigger('change');
+                        
+                        // If we also have a saved date, set it after dates load
+                        if (savedDate) {
+                            setTimeout(() => {
+                                const dateInput = document.getElementById('dateInput');
+                                if (dateInput) {
+                                    dateInput.value = savedDate;
+                                    currentDate = savedDate;
+                                    loadStockData();
+                                }
+                            }, 500);
+                        }
+                    }, 300);
+                }
+            }
+        }
+
+        // Add this function at an appropriate location in your JavaScript
+        function setupPreferenceSaving() {
+            // Save stock selection when changed
+            const stockSelect = document.getElementById('stockSelect');
+            if (stockSelect) {
+                stockSelect.addEventListener('change', function() {
+                    localStorage.setItem('selectedStock', this.value);
+                    console.log('Saved stock preference:', this.value);
+                });
+            }
+
+            // For date selection
+            // This depends on how your date selection is implemented
+            // If using datepicker:
+            if ($.fn.datepicker) {
+                // Override the existing datepicker initialization
+                $('#calendarContainer').on('dateSelected', function(e, dateText) {
+                    localStorage.setItem('selectedDate', dateText);
+                    console.log('Saved date preference:', dateText);
+                });
+            }
+        }
+
+        // Function to restore preferences
+        function restorePreferences() {
+            try {
+                const savedStock = localStorage.getItem('selectedStock');
+                const savedDate = localStorage.getItem('selectedDate');
+                
+                console.log('Restoring preferences - Stock:', savedStock, 'Date:', savedDate);
+                
+                if (savedStock) {
+                    // Set the stock dropdown value
+                    const stockSelect = document.getElementById('stockSelect');
+                    if (stockSelect) {
+                        // Ensure options are loaded first
+                        if (stockSelect.options.length <= 1) {
+                            // If options aren't loaded yet, wait and try again
+                            console.log('Waiting for stock options to load...');
+                            setTimeout(restorePreferences, 500);
+                            return;
+                        }
+                        
+                        // Find if the saved stock exists in options
+                        let stockExists = false;
+                        for (let i = 0; i < stockSelect.options.length; i++) {
+                            if (stockSelect.options[i].value === savedStock) {
+                                stockExists = true;
+                                break;
+                            }
+                        }
+                        
+                        if (stockExists) {
+                            stockSelect.value = savedStock;
+                            currentStock = savedStock;
+                            console.log('Restored stock selection:', savedStock);
+                            
+                            // Trigger change event to load dates
+                            const event = new Event('change');
+                            stockSelect.dispatchEvent(event);
+                            
+                            // Try to restore date after stock is loaded
+                            if (savedDate) {
+                                setTimeout(function() {
+                                    // For jQuery UI datepicker
+                                    try {
+                                        $('#calendarContainer').datepicker('setDate', savedDate);
+                                        currentDate = savedDate;
+                                        $('#dateInput').val(savedDate);
+                                        console.log('Restored date selection:', savedDate);
+                                        
+                                        // Load data for this stock and date
+                                        loadStockData();
+                                    } catch (e) {
+                                        console.error('Error restoring date:', e);
+                                    }
+                                }, 1000); // Wait for dates to load
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error('Error restoring preferences:', e);
+            }
+        }
+
+        // Call these after the document is ready
+        $(document).ready(function() {
+            // Existing initialization code...
+            
+            // Set up preference saving
+            setupPreferenceSaving();
+            
+            // Restore preferences after everything else is initialized
+            setTimeout(restorePreferences, 500);
+        });
+
+        /**
+         * Function to completely fix scrolling issues
+         * Add this function to your annotations.js file
+         */
+        function fixScrollingIssues() {
+            // 1. Close any open modals properly
+            const openModals = document.querySelectorAll('.modal');
+            openModals.forEach(modalEl => {
+                try {
+                    const modalInstance = bootstrap.Modal.getInstance(modalEl);
+                    if (modalInstance) modalInstance.hide();
+                } catch (e) {
+                    console.error('Error closing modal:', e);
+                }
+            });
+
+            // 2. Remove all modal backdrops
+            document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
+                backdrop.parentNode.removeChild(backdrop);
+            });
+
+            // 3. Fix body classes and styles
+            document.body.classList.remove('modal-open');
+            document.body.removeAttribute('style'); // Remove all inline styles
+            document.body.style.overflow = 'auto';  // Explicitly enable scrolling
+
+            // 4. Check for any fixed position elements that might block scrolling
+            document.querySelectorAll('[style*="position: fixed"]').forEach(el => {
+                if (el.classList.contains('modal') || el.classList.contains('modal-backdrop')) {
+                    el.style.display = 'none';
+                }
+            });
+
+            // 5. Ensure scroll events are properly handled
+            window.scrollTo(window.scrollX, window.scrollY);
+        }
+
+        document.getElementById('fix-scroll-btn').addEventListener('click', function() {
+            fixScrollingIssues();
+            showNotification('Scroll behavior has been reset', 'info');
+        });
+    </script>
+    
+    <!-- Custom JavaScript -->
+    <script src="/static/js/annotations.js"></script>
+    <script src="/static/js/chart-annotations.js"></script>
+    <!-- Include the debug script after all other scripts -->
+    <script src="{{ url_for('static', filename='js/chart-debug.js') }}"></script>
+
+    <!-- Debug script to ensure annotations are loaded and displayed -->
+</body>
+</html> 

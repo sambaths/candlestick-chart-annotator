@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Annotation Test</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        input, select {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        #result {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f5f5f5;
+            border-radius: 4px;
+        }
+        .annotation-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        .annotation-table th, .annotation-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        .annotation-table th {
+            background-color: #f2f2f2;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Annotation Test</h1>
+        
+        <div class="form-group">
+            <label for="stock">Stock:</label>
+            <input type="text" id="stock" value="AXISBANK">
+        </div>
+        
+        <div class="form-group">
+            <label for="timestamp">Timestamp:</label>
+            <input type="datetime-local" id="timestamp" value="">
+        </div>
+        
+        <div class="form-group">
+            <label for="signal">Signal:</label>
+            <select id="signal">
+                <option value="long_entry">Long Entry</option>
+                <option value="long_exit">Long Exit</option>
+                <option value="short_entry">Short Entry</option>
+                <option value="short_exit">Short Exit</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label for="price">Price:</label>
+            <input type="number" id="price" value="100.00">
+        </div>
+        
+        <div class="form-group">
+            <label for="reason">Reason:</label>
+            <input type="text" id="reason" value="Test annotation">
+        </div>
+        
+        <button id="submit">Add Annotation</button>
+        <button id="delete-last">Delete Last</button>
+        
+        <div id="result"></div>
+        
+        <h2>Annotations</h2>
+        <table class="annotation-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Stock</th>
+                    <th>Timestamp</th>
+                    <th>Signal</th>
+                    <th>Price</th>
+                    <th>Reason</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody id="annotations-body">
+                <!-- Annotations will be added here -->
+            </tbody>
+        </table>
+    </div>
+    
+    <script>
+        // Set current datetime to timestamp input
+        document.getElementById('timestamp').value = new Date().toISOString().slice(0, 16);
+        
+        // Connect to Socket.IO
+        const socket = io();
+        
+        // Socket events
+        socket.on('annotations_updated', function(data) {
+            console.log('Annotations updated:', data);
+            updateAnnotationsTable(data.annotations);
+        });
+        
+        socket.on('annotations_data', function(data) {
+            console.log('Initial annotations data:', data);
+            updateAnnotationsTable(data.annotations);
+        });
+        
+        // Request initial annotations
+        socket.emit('get_annotations');
+        
+        // Update annotations table
+        function updateAnnotationsTable(annotations) {
+            const tbody = document.getElementById('annotations-body');
+            tbody.innerHTML = '';
+            
+            annotations.forEach(annotation => {
+                const row = document.createElement('tr');
+                
+                row.innerHTML = `
+                    <td>${annotation.id}</td>
+                    <td>${annotation.stock}</td>
+                    <td>${new Date(annotation.timestamp).toLocaleString()}</td>
+                    <td>${annotation.signal}</td>
+                    <td>${annotation.price}</td>
+                    <td>${annotation.reason || '-'}</td>
+                    <td><button class="delete-btn" data-id="${annotation.id}">Delete</button></td>
+                `;
+                
+                tbody.appendChild(row);
+            });
+            
+            // Add event listeners to delete buttons
+            document.querySelectorAll('.delete-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const id = this.getAttribute('data-id');
+                    deleteAnnotation(id);
+                });
+            });
+        }
+        
+        // Add annotation
+        document.getElementById('submit').addEventListener('click', function() {
+            const stock = document.getElementById('stock').value;
+            const timestamp = document.getElementById('timestamp').value;
+            const signal = document.getElementById('signal').value;
+            const price = parseFloat(document.getElementById('price').value);
+            const reason = document.getElementById('reason').value;
+            
+            if (!stock || !timestamp || !signal || isNaN(price)) {
+                document.getElementById('result').textContent = 'Please fill all required fields';
+                return;
+            }
+            
+            const data = {
+                stock: stock,
+                timestamp: new Date(timestamp).toISOString(),
+                signal: signal,
+                price: price,
+                reason: reason
+            };
+            
+            console.log('Submitting annotation:', data);
+            
+            fetch('/api/annotations', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(data)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(errorData => {
+                        throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('Response:', data);
+                document.getElementById('result').textContent = 'Annotation added successfully';
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('result').textContent = 'Error: ' + error.message;
+            });
+        });
+        
+        // Delete last annotation
+        document.getElementById('delete-last').addEventListener('click', function() {
+            fetch('/api/annotations/last', {
+                method: 'DELETE'
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Response:', data);
+                document.getElementById('result').textContent = 'Last annotation deleted';
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('result').textContent = 'Error: ' + error;
+            });
+        });
+        
+        // Delete specific annotation
+        function deleteAnnotation(id) {
+            fetch(`/api/annotations/${id}`, {
+                method: 'DELETE'
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Response:', data);
+                document.getElementById('result').textContent = 'Annotation deleted';
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('result').textContent = 'Error: ' + error;
+            });
+        }
+    </script>
+</body>
+</html> 

@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Management - Stock Data Annotator</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- DataTables CSS -->
+    <link href="https://cdn.datatables.net/1.11.5/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+    <!-- Select2 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet">
+    <!-- Datepicker CSS -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datepicker/1.9.0/css/bootstrap-datepicker.min.css" rel="stylesheet">
+    <!-- Custom styles -->
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+            padding: 20px;
+        }
+        .card {
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .nav-tabs {
+            margin-bottom: 20px;
+        }
+        .progress {
+            height: 25px;
+        }
+        .progress-bar {
+            line-height: 25px;
+            font-size: 14px;
+        }
+        .select2-container {
+            width: 100% !important;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light mb-4">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">Stock Data Annotator</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/">Annotation</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/data">Data Management</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid">
+        <!-- Data Management Tabs -->
+        <ul class="nav nav-tabs" id="dataTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="download-tab" data-bs-toggle="tab" data-bs-target="#download" type="button">
+                    Download Data
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="summary-tab" data-bs-toggle="tab" data-bs-target="#summary" type="button">
+                    Data Summary
+                </button>
+            </li>
+        </ul>
+
+        <!-- Tab Content -->
+        <div class="tab-content" id="dataTabsContent">
+            <!-- Download Tab -->
+            <div class="tab-pane fade show active" id="download">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Download Stock Data</h5>
+                        <form id="downloadForm" class="mb-4">
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Select Stocks</label>
+                                    <select class="form-select" id="stockSelect" multiple>
+                                        {% for stock in nifty50_stocks %}
+                                            <option value="{{ stock }}">{{ stock }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">Start Date</label>
+                                    <input type="text" class="form-control" id="startDate" required>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">End Date</label>
+                                    <input type="text" class="form-control" id="endDate" required>
+                                </div>
+                            </div>
+                            <div class="row mb-3">
+                                <div class="col-md-3">
+                                    <label class="form-label">Resolution</label>
+                                    <select class="form-select" id="resolution">
+                                        <option value="1D">Daily</option>
+                                        <option value="1H">Hourly</option>
+                                        <option value="15">15 Minutes</option>
+                                        <option value="5">5 Minutes</option>
+                                        <option value="1">1 Minute</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary" id="downloadBtn">
+                                Download Data
+                            </button>
+                        </form>
+
+                        <!-- Download Progress -->
+                        <div id="downloadProgress" style="display: none;">
+                            <div class="progress mb-2">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 100%"></div>
+                            </div>
+                        </div>
+                        <div id="downloadStatus" class="alert" style="display: none;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Summary Tab -->
+            <div class="tab-pane fade" id="summary">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Available Stock Data</h5>
+                        <div class="table-responsive" style="width: 100%;">
+                            <table id="summaryTable" class="table table-striped" style="width: 100%;">
+                                <thead>
+                                    <tr>
+                                        <th>Symbol</th>
+                                        <th>Start Date</th>
+                                        <th>End Date</th>
+                                        <th>Resolution</th>
+                                        <th>Row Count</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.11.5/js/dataTables.bootstrap5.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datepicker/1.9.0/js/bootstrap-datepicker.min.js"></script>
+    <script>
+    // Base URL for all API calls
+    const baseURL = "http://localhost:8050";
+    
+    $(document).ready(function() {
+        // Initialize Select2
+        $('#stockSelect').select2({
+            placeholder: "Select stocks to download",
+            allowClear: true
+        });
+        
+        // Initialize datepickers
+        $('#startDate, #endDate').datepicker({
+            format: 'yyyy-mm-dd',
+            autoclose: true,
+            todayHighlight: true
+        });
+        
+        // Set default dates (last 30 days)
+        const today = new Date();
+        const lastMonth = new Date();
+        lastMonth.setDate(today.getDate() - 30);
+        
+        $('#startDate').datepicker('setDate', lastMonth);
+        $('#endDate').datepicker('setDate', today);
+        
+        // Initialize DataTable
+        const summaryTable = $('#summaryTable').DataTable({
+            processing: true,
+            serverSide: false,
+            ajax: {
+                url: baseURL + '/api/stocks/summary',
+                dataSrc: 'data'
+            },
+            columns: [
+                { data: 'symbol' },
+                { data: 'start_date' },
+                { data: 'end_date' },
+                { data: 'resolution' },
+                { data: 'row_count' },
+                { 
+                    data: null,
+                    render: function(data) {
+                        return `<button class="btn btn-sm btn-danger delete-btn" data-symbol="${data.symbol}">Delete</button>`;
+                    }
+                }
+            ],
+            order: [[0, 'asc']]
+        });
+        
+        // Handle download form submission
+        $('#downloadForm').on('submit', function(e) {
+            e.preventDefault();
+            
+            const symbols = $('#stockSelect').val();
+            const startDate = $('#startDate').val();
+            const endDate = $('#endDate').val();
+            const resolution = $('#resolution').val();
+            
+            if (!symbols || symbols.length === 0) {
+                alert('Please select at least one stock');
+                return;
+            }
+            
+            // Show progress
+            $('#downloadBtn').prop('disabled', true);
+            $('#downloadBtn').html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Downloading...');
+            $('#downloadProgress').show();
+            $('#downloadStatus').hide();
+            
+            // Send download request
+            fetch(baseURL + '/api/stocks/download', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    symbols: symbols,
+                    start_date: startDate,
+                    end_date: endDate,
+                    resolution: resolution
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Hide progress
+                $('#downloadBtn').prop('disabled', false);
+                $('#downloadBtn').text('Download Data');
+                $('#downloadProgress').hide();
+                
+                // Show status
+                if (data.error) {
+                    $('#downloadStatus').removeClass('alert-success').addClass('alert-danger');
+                    $('#downloadStatus').text('Error: ' + data.error);
+                } else {
+                    $('#downloadStatus').removeClass('alert-danger').addClass('alert-success');
+                    $('#downloadStatus').text(data.message);
+                    
+                    // Refresh the data table
+                    summaryTable.ajax.reload();
+                }
+                $('#downloadStatus').show();
+            })
+            .catch(error => {
+                // Hide progress
+                $('#downloadBtn').prop('disabled', false);
+                $('#downloadBtn').text('Download Data');
+                $('#downloadProgress').hide();
+                
+                // Show error
+                $('#downloadStatus').removeClass('alert-success').addClass('alert-danger');
+                $('#downloadStatus').text('Error: ' + error.message);
+                $('#downloadStatus').show();
+            });
+        });
+        
+        // Handle delete button clicks
+        $('#summaryTable').on('click', '.delete-btn', function() {
+            const symbol = $(this).data('symbol');
+            
+            if (confirm(`Are you sure you want to delete all data for ${symbol}?`)) {
+                fetch(baseURL + `/api/data/delete/${symbol}`, {
+                    method: 'DELETE'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        alert('Error: ' + data.error);
+                    } else {
+                        // Refresh the data table
+                        summaryTable.ajax.reload();
+                    }
+                })
+                .catch(error => {
+                    alert('Error: ' + error.message);
+                });
+            }
+        });
+    });
+    </script>
+</body>
+</html> 
