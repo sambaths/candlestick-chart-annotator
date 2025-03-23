@@ -1,6 +1,8 @@
-# Data Annotator Project - Comprehensive Setup Guide
+# Candlestick Chart Annotator
 
-This guide provides detailed instructions to set up and run the Data Annotator project, a web-based application for visualizing and annotating stock market data. The system allows users to mark trading signals on stock charts and store these annotations for analysis.
+This guide provides detailed instructions to set up and run the Candlestick Chart Annotator project, a web-based application for visualizing and annotating stock market data. The system allows users to mark trading signals on stock charts and store these annotations for analysis.
+
+_NB: This is mostly created with AI, So expect some errors and issues._
 
 ## Table of Contents
 
@@ -79,9 +81,9 @@ The Data Annotator is designed for traders and analysts who need to mark signifi
    sudo -u postgres psql
    
    # Inside PostgreSQL prompt, create user and database
-   CREATE USER data_annotator WITH PASSWORD 'your_password';
-   CREATE DATABASE data_annotator_db OWNER data_annotator;
-   ALTER USER data_annotator WITH SUPERUSER;
+   CREATE USER candlestick-chart-annotator WITH PASSWORD 'your_password';
+   CREATE DATABASE candlestick-chart-annotator_db OWNER candlestick-chart-annotator;
+   ALTER USER candlestick-chart-annotator WITH SUPERUSER;
    
    # Exit PostgreSQL prompt
    \q
@@ -93,7 +95,7 @@ The Data Annotator is designed for traders and analysts who need to mark signifi
    
    ```bash
    git clone https://github.com/sambaths/candlestick-chart-annotator
-   cd data_annotator
+   cd candlestick-chart-annotator
    ```
 
 2. **Create a virtual environment**:
@@ -220,7 +222,7 @@ UV offers significant performance improvements compared to pip, especially for l
    
    ```python
    # Look for a line similar to this:
-   self.engine = create_engine('postgresql://data_annotator:your_password@localhost/data_annotator_db')
+   self.engine = create_engine('postgresql://candlestick-chart-annotator:your_password@localhost/candlestick-chart-annotator_db')
    ```
 
    Modify this to match your PostgreSQL configuration, replacing the username, password, and database name as needed.
@@ -230,7 +232,7 @@ UV offers significant performance improvements compared to pip, especially for l
 1. **Run the database setup script**:
    
    ```bash
-   python data_annotator/setup_db.py
+   python candlestick-chart-annotator/setup_db.py
    ```
    
    This will create the necessary tables in your PostgreSQL database. If you encounter any errors, make sure your database connection string is correctly configured.
@@ -239,7 +241,7 @@ UV offers significant performance improvements compared to pip, especially for l
    
    If you need to migrate data from another source, you can use:
    ```bash
-   python data_annotator/migrate_data.py
+   python candlestick-chart-annotator/migrate_data.py
    ```
 
 ## Running the Application
@@ -247,7 +249,7 @@ UV offers significant performance improvements compared to pip, especially for l
 1. **Start the Flask application**:
    
    ```bash
-   python data_annotator/app.py
+   python candlestick-chart-annotator/app.py
    ```
    
    By default, the application will be accessible at `http://localhost:8050`.
@@ -294,7 +296,7 @@ UV offers significant performance improvements compared to pip, especially for l
 The project includes a standalone command-line tool for viewing and analyzing annotation data:
 
 ```bash
-python data_annotator/annotation_viewer.py
+python candlestick-chart-annotator/annotation_viewer.py
 ```
 
 ### Options:
@@ -311,23 +313,23 @@ python data_annotator/annotation_viewer.py
 
 Display all annotations in table format:
 ```bash
-python data_annotator/annotation_viewer.py
+python candlestick-chart-annotator/annotation_viewer.py
 ```
 
 Filter annotations for a specific stock:
 ```bash
-python data_annotator/annotation_viewer.py --stock AXISBANK
+python candlestick-chart-annotator/annotation_viewer.py --stock AXISBANK
 ```
 
 Generate visualization charts of your annotation data:
 ```bash
-python data_annotator/annotation_viewer.py --format plot --output annotations_analysis.png
+python candlestick-chart-annotator/annotation_viewer.py --format plot --output annotations_analysis.png
 ```
 
 ## Project Structure
 
 ```
-data_annotator/
+candlestick-chart-annotator/
 ├── app.py                  # Main Flask web application
 ├── db_manager.py           # Database operations and ORM models
 ├── data_provider.py        # Abstract interface for stock data providers
@@ -362,7 +364,7 @@ If you encounter database connection errors:
 
 2. **Test connection credentials**:
    ```bash
-   psql -U data_annotator -d data_annotator_db -h localhost
+   psql -U candlestick-chart-annotator -d candlestick-chart-annotator_db -h localhost
    ```
    
    If this fails, your connection details may be incorrect.
@@ -391,7 +393,7 @@ If you don't see any stocks in the dropdown:
 
 2. **Verify data in database**:
    ```bash
-   psql -U data_annotator -d data_annotator_db -c "SELECT DISTINCT symbol FROM stocks"
+   psql -U candlestick-chart-annotator -d candlestick-chart-annotator_db -c "SELECT DISTINCT symbol FROM stocks"
    ```
 
 ### UI Issues
